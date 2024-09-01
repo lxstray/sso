@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 	"sso/internal/domain/models"
+	"sso/internal/lib/jwt"
 	"sso/internal/storage"
 	"time"
 
@@ -14,6 +15,8 @@ import (
 
 var (
 	ErrInvalidCredentials = errors.New("invalid credentials")
+	ErrInvalidAppID       = errors.New("invalid app id")
+	ErrUserExists         = errors.New("user already exists")
 )
 
 type Auth struct {
@@ -77,7 +80,7 @@ func (a *Auth) Login(
 		if errors.Is(err, storage.ErrUserNotFound) {
 			a.log.Warn("user not found", err)
 
-			return "", fmt.Errorf("%s: %w", op, ErrInvalidCredentials)
+			return "", fmt.Errorf("%s: %w", op, ErrUserExists)
 		}
 
 		a.log.Error("failed to get user", err)
@@ -97,6 +100,15 @@ func (a *Auth) Login(
 	}
 
 	log.Info("user logged in successfully")
+
+	token, err := jwt.NewToken(user, app, a.tokenTTl)
+	if err != nil {
+		a.log.Error("failed to generate token")
+
+		return "", fmt.Errorf("%s: %w", op, err)
+	}
+
+	return token, nil
 
 }
 
@@ -119,6 +131,12 @@ func (a *Auth) RegisterNewUser(ctx context.Context, email string, pass string) (
 
 	id, err := a.usrSaver.SaveUser(ctx, email, passHash)
 	if err != nil {
+		if errors.Is(err, storage.ErrUserExists) {
+			log.Warn("user already exists")
+
+			return 0, fmt.Errorf("%s: %w", op, ErrInvalidCredentials)
+		}
+
 		log.Error("failed to save user", err)
 
 		return 0, fmt.Errorf("%s: %w", op, err)
@@ -130,5 +148,26 @@ func (a *Auth) RegisterNewUser(ctx context.Context, email string, pass string) (
 }
 
 func (a *Auth) IsAdmin(ctx context.Context, userID int64) (bool, error) {
-	panic("not implemented")
+	const op = "Auth.IsAdmin"
+
+	log := a.log.With(
+		slog.String("op", op),
+		slog.Int64("user_id", userID),
+	)
+
+	log.Info("checking if user is admin")
+
+	isAdmin, err := a.usrProvider.IsAdmin(ctx, userID)
+	if err != nil {
+		if errors.Is(err, storage.ErrAppNotFound) {
+			log.Warn("user not found")
+
+			return false, fmt.Errorf("%s: %w", op, ErrInvalidAppID)
+		}
+		return false, fmt.Errorf("%s: %w", op, err)
+	}
+
+	log.Info("checked if user is admin", slog.Bool("is_admin", isAdmin))
+
+	return isAdmin, nil
 }
