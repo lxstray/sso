@@ -26,10 +26,6 @@ func main() {
 
 	go application.GRPCSrv.MustRun()
 
-	//TODO: инициализация приложения(app)
-
-	//TODO: запустить grpc сервер
-
 	//graceful shutdown
 
 	stop := make(chan os.Signal, 1)
